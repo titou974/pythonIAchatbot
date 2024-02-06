@@ -18,7 +18,46 @@ users = {}
 context_message = "Tfk ?"
 greeting = "Salut chou"
 invitation = "Je suis sur mon mym perso, si tu veux on peut continuer à parler un peu dessus, j'échange du contenue sympa. passe à l'occasion :) : https://mym.fans/Petite_creature"
-newMessage = False
+accounts = [
+    {
+        "username": "natashamym",
+        "age": "29",
+        "postal_code": 91000,
+        "used": False
+    },
+    {
+        "username": "lolamym",
+        "age": "23",
+        "postal_code": 13002,
+        "used": False
+    },
+    {
+        "username": "lauramym",
+        "age": "21",
+        "postal_code": 75015,
+        "used": False
+    },
+    {
+        "username": "luciemym",
+        "age": "25",
+        "postal_code": 69001,
+        "used": False
+    },
+    {
+        "username": "sophiemym",
+        "age": "27",
+        "postal_code": 97410,
+        "used": False
+    }
+]
+
+emailVerification = "lafermelescollegiens@gmail.com"
+
+sessionIndex = 0
+
+SESSION_TIMEOUT = 120
+
+
 
 def init_driver():
     options = webdriver.ChromeOptions()
@@ -27,15 +66,12 @@ def init_driver():
     return webdriver.Chrome(options=options)
 
 def check_for_initialization(driver, timeout=30):
-    driver.get("https://www.coco.gg/chat/index.html#natasha92_2_29_36213_0_290649056_0_")
     end_time = time.time() + timeout
     while True:
         try:
             time.sleep(2)
             searchy_div = driver.find_element(By.ID, 'searchy')
-            # Look for any child divs with class "fixedsy" inside "searchy" div
             fixedsy_divs = searchy_div.find_elements(By.CLASS_NAME, 'fixedsy')
-            # If any "fixedsy" divs are found, return False
             if len(fixedsy_divs) != 0:
                 break
         except TimeoutException:
@@ -56,16 +92,18 @@ def verify_email(driver, email):
     time.sleep(2)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Valider']"))).click()
     time.sleep(5)
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'coco.gg')]"))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'coco.gg')]"))).click()
 
 def login(driver, username, age, postal_code):
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='fc-cta-consent']"))).click()
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'nicko'))).send_keys(username)
+    driver.find_element(By.ID, 'nicko').send_keys(username)
     driver.find_element(By.ID, 'femme').click()
     driver.find_element(By.ID, 'ageu').send_keys(age)
     driver.find_element(By.ID, 'zipo').send_keys(postal_code)
     driver.find_element(By.ID, 'entry').click()
     time.sleep(5)
+
+def validate_CTA(driver):
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='fc-cta-consent']"))).click()
 
 def switch_to_new_tab(driver):
     # Wait for the new tab to open
@@ -77,6 +115,39 @@ def switch_to_new_tab(driver):
     # Switch to the new window which is the second tab
     new_window = [window for window in driver.window_handles if window != original_window][0]
     driver.switch_to.window(new_window)
+
+def check_if_connected_to_premium(driver): 
+    WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, 'opt4'))).click()
+    time.sleep(2)
+    elements = driver.find_elements(By.CSS_SELECTOR, "div.overy b")
+    for element in elements:
+        if element.text == "OUI":
+            print("Found a <b> with text 'OUI' inside a <div> with class 'overy'")
+            return False
+    else:
+        print("No <b> with text 'OUI' found inside a <div> with class 'overy'")
+        return True
+    
+def start_new_session(driver):
+    global sessionIndex
+    print('sessionIndex', sessionIndex)
+    if sessionIndex == len(accounts):
+        sessionIndex = 0
+    account = accounts[sessionIndex]
+    driver.get("https://www.coco.gg")
+    time.sleep(5)
+    validate_CTA(driver)
+    login(driver, account['username'], account['age'], account['postal_code'])
+    switch_to_new_tab(driver)
+    check_for_initialization(driver)
+    if check_if_connected_to_premium(driver) == False:
+        verify_email(driver, emailVerification)
+        login(driver, account['username'], account['age'], account['postal_code'])
+        switch_to_new_tab(driver)
+        check_for_initialization(driver)
+        sessionIndex += 1
+    else :
+        sessionIndex += 1
 
 def locate_chat_tab(driver):
     WebDriverWait(driver, 30).until(
@@ -130,14 +201,11 @@ def handle_new_message(name, driver):
             users[name]['newMessage'] = False
 
 def main():
+    start_time = time.time()
     driver = init_driver()
     action = ActionChains(driver)
     try:
-        check_for_initialization(driver)
-        verify_email(driver, 'lafermelescollegiens@gmail.com')
-        login(driver, 'natasha92', '29', 91000)
-        switch_to_new_tab(driver)
-        check_for_initialization(driver)
+        start_new_session(driver)
         while True:
             i = 1
             while i < conversationNumberLimit:  
@@ -170,6 +238,10 @@ def main():
                     print("No new chat tab found")
                     time.sleep(1)
                     i = 1  
+                    if time.time() - start_time > SESSION_TIMEOUT:
+                        print("Session timeout exceeded. Starting a new session...")
+                        driver.quit()  
+                        return main() 
                 except NoSuchElementException:
                     print(f"No such element {element_id}, might be fewer chat tabs than expected.")
                     break 
@@ -189,7 +261,3 @@ if __name__ == "__main__":
 # # options.add_argument('--proxy-server=%s' % PROXY)
 
 # driver = webdriver.Chrome(options = options)
-
-# # STEP 1: Verif Adresse MAIL
-
-# driver.get("https://www.coco.gg/chat/index.html#lolach_2_23_28517_0_676678502_0_")
