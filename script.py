@@ -9,7 +9,13 @@ from selenium.common.exceptions import TimeoutException
 from selenium.common.exceptions import NoSuchElementException
 import time
 import re
+from openai import OpenAI
 
+client = OpenAI(
+    api_key='OPENAI_API_KEY',
+)
+
+assistantId = 'asst_N0lJcSUgMbo9gdvkjfEF6BeV'
 conversationNumberLimit = 20
 processed_usernames = set()
 usernameUser = ""
@@ -18,52 +24,84 @@ users = {}
 context_message = "Tfk ?"
 greeting = "Salut chou"
 invitation = "Je suis sur mon mym perso, si tu veux on peut continuer à parler un peu dessus, j'échange du contenue sympa. passe à l'occasion :) : https://mym.fans/Petite_creature"
-accounts = [
+accounts = [ 
     {
-        "username": "natashamym",
+        "username": "lilydonnesonmym",
         "age": "29",
-        "postal_code": 91000,
+        "postal_code": 31000,
         "used": False
     },
     {
-        "username": "lolamym",
+        "username": "lilydonnesonmym",
+        "age": "27",
+        "postal_code": 34000,
+        "used": False
+    },
+    {
+        "username": "lilydonnesonmym",
         "age": "23",
         "postal_code": 13002,
         "used": False
     },
     {
-        "username": "lauramym",
-        "age": "21",
-        "postal_code": 75015,
-        "used": False
-    },
-    {
-        "username": "luciemym",
+        "username": "lilydonnesonmym",
         "age": "25",
         "postal_code": 69001,
         "used": False
     },
     {
-        "username": "sophiemym",
-        "age": "27",
-        "postal_code": 97410,
+        "username": "lilydonnesonmym",
+        "age": "21",
+        "postal_code": 75015,
         "used": False
-    }
+    },   
 ]
 
 emailVerification = "lafermelescollegiens@gmail.com"
 
 sessionIndex = 0
 
-SESSION_TIMEOUT = 120
-
-
+SESSION_TIMEOUT = 12 * 60
 
 def init_driver():
     options = webdriver.ChromeOptions()
     # if proxy:
     #     options.add_argument(f'--proxy-server={proxy}')
     return webdriver.Chrome(options=options)
+
+def send_message(threadId, userMessage, user):
+    global assistantId
+    message = client.beta.threads.messages.create(
+        thread_id=threadId,
+        role="user",
+        content=userMessage
+    )
+    run = client.beta.threads.runs.create(
+        thread_id=threadId,
+        assistant_id=assistantId
+    )
+    for _ in range(10):  # Retry up to 10 times
+        completed_run = client.beta.threads.runs.retrieve(
+            thread_id=threadId,
+            run_id=run.id
+        )
+        if completed_run.status == "completed":
+            messages = client.beta.threads.messages.list(thread_id=threadId)
+            assistant_messages = [msg for msg in messages.data if msg.role == 'assistant']
+            print("Assistant's messages:", assistant_messages)
+            if assistant_messages:
+                assistant_response = assistant_messages[0].content[0].text.value
+                print("Assistant's response:", assistant_response, "for user:", userMessage)
+                return assistant_response
+            else:
+                print("No response from the assistant found.")
+                return None
+        time.sleep(5)
+
+def create_thread(user):
+    thread = client.beta.threads.create()
+    users[user]['threadId'] = thread.id
+    return thread.id
 
 def check_for_initialization(driver, timeout=30):
     end_time = time.time() + timeout
@@ -82,9 +120,7 @@ def check_for_initialization(driver, timeout=30):
         time.sleep(5)  
 
 def verify_email(driver, email):
-    time.sleep(2)
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, 'opt4'))).click()
-    time.sleep(2)
+    print("Verifying email")
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Récupération profil')]"))).click()
     time.sleep(2)
     email_input = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, 'autamailu')))
@@ -105,16 +141,11 @@ def login(driver, username, age, postal_code):
 def validate_CTA(driver):
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='fc-cta-consent']"))).click()
 
-def switch_to_new_tab(driver):
+def switch_to_new_tab(driver, numberOfWindows):
     # Wait for the new tab to open
-    WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
-
-    # Store the ID of the original window
-    original_window = driver.current_window_handle
-
-    # Switch to the new window which is the second tab
-    new_window = [window for window in driver.window_handles if window != original_window][0]
-    driver.switch_to.window(new_window)
+    WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(numberOfWindows))
+    new_window_index = numberOfWindows - 1  
+    driver.switch_to.window(driver.window_handles[new_window_index])
 
 def check_if_connected_to_premium(driver): 
     WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, 'opt4'))).click()
@@ -123,10 +154,10 @@ def check_if_connected_to_premium(driver):
     for element in elements:
         if element.text == "OUI":
             print("Found a <b> with text 'OUI' inside a <div> with class 'overy'")
-            return False
+            return True
     else:
         print("No <b> with text 'OUI' found inside a <div> with class 'overy'")
-        return True
+        return False
     
 def start_new_session(driver):
     global sessionIndex
@@ -138,12 +169,14 @@ def start_new_session(driver):
     time.sleep(5)
     validate_CTA(driver)
     login(driver, account['username'], account['age'], account['postal_code'])
-    switch_to_new_tab(driver)
+    switch_to_new_tab(driver, 2)
     check_for_initialization(driver)
-    if check_if_connected_to_premium(driver) == False:
+    checkPremium = check_if_connected_to_premium(driver)
+    print('checkPremium', checkPremium)
+    if checkPremium == False:
         verify_email(driver, emailVerification)
-        login(driver, account['username'], account['age'], account['postal_code'])
-        switch_to_new_tab(driver)
+        login(driver, '', account['age'], account['postal_code'])
+        switch_to_new_tab(driver, 3)
         check_for_initialization(driver)
         sessionIndex += 1
     else :
@@ -158,25 +191,22 @@ def chat_with_user(user, driver, action, element):
     input_field = WebDriverWait(driver, 5).until(
         EC.element_to_be_clickable((By.ID, "cocoa"))
     )
+    response = send_message(users[user]['threadId'], users[user]['concatenatedMessage'], user)
     if user not in conversation_states:
-        input_field.send_keys(greeting)
+        input_field.send_keys(response)
         input_field.send_keys(Keys.ENTER)
-        conversation_states[user] = {'greeting_sent': True, 'messages': [greeting], 'conversation_end': False}
+        conversation_states[user] = {'greeting_sent': True, 'messages': [response], 'conversation_end': False}
         time.sleep(2)
-    elif context_message not in conversation_states[user]['messages']:
-        input_field.send_keys(context_message)
+    elif len(conversation_states[user]['messages']) < 5:
+        input_field.send_keys(response)
         input_field.send_keys(Keys.ENTER)
-        conversation_states[user]['messages'].append(context_message)
+        conversation_states[user]['messages'].append(response)
         time.sleep(2)
-    elif invitation not in conversation_states[user]['messages']: 
-        input_field.send_keys(invitation)
+    elif len(conversation_states[user]['messages']) == 5:
+        input_field.send_keys(response)
         input_field.send_keys(Keys.ENTER)
-        time.sleep(2)   
-        conversation_states[user]['messages'].append(invitation)
+        conversation_states[user]['messages'].append(response)
         conversation_states[user]['conversation_end'] = True
-        action.context_click(element).perform()
-        processed_usernames.add(user)
-        print(f'La conversation avec {users[user]["username"]} est terminée')
         time.sleep(2)
     else:
         processed_usernames.add(user)
@@ -185,20 +215,29 @@ def chat_with_user(user, driver, action, element):
 def handle_new_message(name, driver):
     text_container = driver.find_element(By.ID, "textum")
     html_content = text_container.get_attribute("innerHTML")
-
-    # Use regex to extract all content up to the <br> tag following the c5 class span
     pairs = re.findall(r'<span class="c5">(.*?)</span>(.*?)(?=<span class="c5">|<br>|$)', html_content, re.DOTALL)
-    
+    if name in users and users[name]['newMessageList']:
+        users[name]['newMessageList'].clear()
     for username, message in pairs:
         message = message.strip()
         if name not in users:
-            users[name] = {'username': name, 'messages': [message], 'newMessage': True}
+            users[name] = {'username': name, 'messages': [message], 'newMessage': True, 'newMessageList': [message],'threadId': None}
+            create_thread(name)
         elif message not in users[name]['messages']:
             users[name]['messages'].append(message)
             users[name]['newMessage'] = True
+            users[name]['newMessageList'].append(message)
         else:
             print('message déjà traité')
             users[name]['newMessage'] = False
+
+    if users[name]['newMessageList']:
+        single_sentence = ' '.join(users[name]['newMessageList'])
+        print(f"Concatenated new messages for {name}: {single_sentence}")
+        # Here you can use single_sentence as needed, e.g., storing it back in users or processing it further
+        users[name]['concatenatedMessage'] = single_sentence
+
+    
 
 def main():
     start_time = time.time()
@@ -240,6 +279,9 @@ def main():
                     i = 1  
                     if time.time() - start_time > SESSION_TIMEOUT:
                         print("Session timeout exceeded. Starting a new session...")
+                        conversation_states.forEach((user) => {
+                            value.conversation_end = true
+                        })
                         driver.quit()  
                         return main() 
                 except NoSuchElementException:
